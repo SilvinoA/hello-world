@@ -1,0 +1,125 @@
+DROP TRIGGER IF EXISTS Check_If_Eligible_For_Loan;
+
+DELIMITER //
+CREATE TRIGGER Check_If_Eligible_For_Loan
+BEFORE INSERT ON T_Loan
+FOR EACH ROW 
+BEGIN 
+DECLARE msg VARCHAR(255); 
+DECLARE CUSID varchar(4); 
+DECLARE loansAmountIndiv INT; 
+DECLARE loansAmountGroupOrIndiv INT; 
+DECLARE personalLoanCount INT; 
+DECLARE totalLoanAmount INT; 
+DECLARE homeLoanCount INT;
+
+/*checking if the customer owns more than 5 loans individually*/
+SELECT count(Customer_ID) INTO loansAmountIndiv
+FROM T_Loan l,
+     T_Account a,
+     T_Own o
+WHERE Account_BSB = BSB
+  AND Account_No = AccountNo
+  AND BSB = Loan_AccountBSB
+  AND AccountNo=Loan_AcctNo
+HAVING count(Customer_ID) = 1; 
+
+IF loansAmountIndiv>5 THEN
+SET msg = 'Error: Customer has at least 5 loans individually'; signal SQLSTATE '45000'
+SET MESSAGE_TEXT=msg; 
+END IF;
+
+/*checking if the customer owns more than 8 loans individually or in joint accounts*/
+SELECT Customer_ID INTO CUSID
+FROM T_Own o
+WHERE new.Loan_AccountBSB = Account_BSB
+  AND new.Loan_AcctNo = Account_No
+  limit 1;
+  
+  SELECT count(Customer_ID) INTO loansAmountGroupOrIndiv
+FROM T_Loan l,
+     T_Account a,
+     T_Own o
+WHERE Account_BSB = BSB
+  AND Account_No = AccountNo
+  AND BSB = Loan_AccountBSB
+  AND AccountNo=Loan_AcctNo
+  AND Customer_ID = CUSID; 
+
+IF loansAmountGroupOrIndiv>8 THEN
+  SET msg = 'Error: Customer has at least 8 loans in groups or individually'; signal SQLSTATE '45000'
+  SET MESSAGE_TEXT=msg; 
+  END IF; 
+  
+  /*checking if customer owns at least 1 personal loan*/
+IF new.Loan_Type = 'LT3' THEN
+  SELECT Customer_ID INTO CUSID
+  FROM T_Own o
+  WHERE new.Loan_AccountBSB = Account_BSB
+    AND new.Loan_AcctNo = Account_No
+    limit 1;
+    SELECT count(CUSID) INTO personalLoanCount
+  FROM T_Loan l,
+       T_Account a,
+       T_Own o
+  WHERE Account_BSB = BSB
+    AND Account_No = AccountNo
+    AND BSB = Loan_AccountBSB
+    AND AccountNo=Loan_AcctNo
+    AND Customer_ID = CUSID
+    AND new.Loan_Type = Loan_Type; 
+
+IF personalLoanCount>=1 THEN
+  SET msg = 'Error: Customer has at least 1 personal loan'; 
+  signal SQLSTATE '45000' SET MESSAGE_TEXT=msg; 
+  END IF; 
+END IF;
+  
+  /*checking if customer owns at least 3 home loans*/
+IF new.Loan_Type = 'LT1' THEN
+  SELECT Customer_ID INTO CUSID
+  FROM T_Own o
+  WHERE new.Loan_AccountBSB = Account_BSB
+    AND new.Loan_AcctNo = Account_No
+    limit 1;
+    SELECT count(CUSID) INTO homeLoanCount
+  FROM T_Loan l,
+       T_Account a,
+       T_Own o
+  WHERE Account_BSB = BSB
+    AND Account_No = AccountNo
+    AND BSB = Loan_AccountBSB
+    AND AccountNo=Loan_AcctNo
+    AND Customer_ID = CUSID
+    AND new.Loan_Type = Loan_Type; 
+    
+    IF homeLoanCount>=3 THEN
+  SET msg = 'Error: Customer has at least 3 home loans'; 
+  signal SQLSTATE '45000'
+  SET MESSAGE_TEXT=msg; 
+  END IF; 
+  END IF;
+  
+  /*checking if the customer's total balance across all owned accounts exceeds $10,000,000*/
+  SELECT Customer_ID INTO CUSID
+FROM T_Own o
+WHERE new.Loan_AccountBSB = Account_BSB
+  AND new.Loan_AcctNo = Account_No
+  limit 1;
+  
+  SELECT sum(LoanAmount) INTO totalLoanAmount
+FROM T_Loan l,
+     T_Account a,
+     T_Own o
+WHERE Account_BSB = BSB
+  AND Account_No = AccountNo
+  AND BSB = Loan_AccountBSB
+  AND AccountNo=Loan_AcctNo
+  AND Customer_ID = CUSID; 
+  
+IF totalLoanAmount>10000000 THEN
+  SET msg = 'Error: Customer"s total loan amount exceeds $10,000,000'; 
+  signal SQLSTATE '45000' SET MESSAGE_TEXT=msg; 
+  END IF; 
+  END//
+DELIMITER ;
